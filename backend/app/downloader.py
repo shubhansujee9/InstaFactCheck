@@ -147,12 +147,20 @@ def download_reel(url: str) -> DownloadResult:
         except (json.JSONDecodeError, OSError) as exc:
             logger.warning("Failed to parse info JSON: %s", exc)
 
-    # ── Step 4: Fallback video & caption extraction if yt-dlp did not download video ──
+    # ── Step 4: Fallback video & caption extraction via parth-dl and instaloader ──
+    if not video_path:
+        logger.info("yt-dlp produced no video. Attempting parth-dl direct resolver for %s...", url)
+        video_path, fb_caption, fb_title = _download_video_parth_dl(url, tmp_path)
+        if fb_caption and not caption:
+            caption = fb_caption
+        if fb_title and not title:
+            title = fb_title
+
     if not video_path:
         shortcode_match = re.search(r"/(?:p|reel|tv|share/(?:p|reel))/([A-Za-z0-9_-]+)", url)
         if shortcode_match:
             shortcode = shortcode_match.group(1)
-            logger.info("yt-dlp produced no video. Attempting instaloader direct CDN video download for %s...", shortcode)
+            logger.info("Attempting instaloader direct CDN video download for %s...", shortcode)
             video_path, fb_caption, fb_title = _download_video_instaloader_fallback(shortcode, tmp_path)
             if fb_caption and not caption:
                 caption = fb_caption
@@ -187,6 +195,43 @@ def download_reel(url: str) -> DownloadResult:
         title=title,
         temp_dir=tmp,
     )
+
+
+def _download_video_parth_dl(url: str, tmp_path: Path) -> tuple[Path | None, str, str]:
+    """Download video using parth-dl GraphQL resolver."""
+    try:
+        import parth_dl
+        import httpx
+
+        info = parth_dl.get_info(url)
+        if not isinstance(info, dict):
+            return None, "", ""
+
+        caption = info.get("title") or info.get("caption") or ""
+        uploader = info.get("uploader") or ""
+        title = f"Video by @{uploader}" if uploader else "Instagram Reel"
+
+        formats = info.get("formats", [])
+        if not formats and info.get("entries"):
+            entries = info["entries"]
+            if isinstance(entries, list) and len(entries) > 0 and isinstance(entries[0], dict):
+                formats = entries[0].get("formats", [])
+
+        if formats and formats[0].get("url"):
+            direct_url = formats[0]["url"]
+            target_file = tmp_path / "reel_video.mp4"
+            logger.info("parth-dl found video stream: %s. Downloading...", direct_url[:80])
+            with httpx.Client(timeout=60.0, follow_redirects=True) as client:
+                resp = client.get(direct_url)
+                if resp.status_code == 200 and len(resp.content) > 1000:
+                    target_file.write_bytes(resp.content)
+                    logger.info("Successfully downloaded video via parth-dl (%d bytes) -> %s", len(resp.content), target_file)
+                    return target_file, caption, title
+
+        return None, caption, title
+    except Exception as exc:
+        logger.warning("parth-dl video download failed: %s", exc)
+        return None, "", ""
 
 
 def _download_video_instaloader_fallback(shortcode: str, tmp_path: Path) -> tuple[Path | None, str, str]:

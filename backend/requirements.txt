@@ -8,6 +8,7 @@ python-dotenv>=1.0.0
 pydantic>=2.5.0
 httpx>=0.26.0
 instaloader>=4.10.0
+parth-dl>=1.2.0
 google-generativeai>=0.8.0
 duckduckgo-search>=8.0.0
 ddgs>=9.0.0
