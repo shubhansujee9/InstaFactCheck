@@ -147,9 +147,21 @@ def download_reel(url: str) -> DownloadResult:
         except (json.JSONDecodeError, OSError) as exc:
             logger.warning("Failed to parse info JSON: %s", exc)
 
-    # ── Step 4: Fallback caption extraction if info.json was not generated ──
+    # ── Step 4: Fallback video & caption extraction if yt-dlp did not download video ──
+    if not video_path:
+        shortcode_match = re.search(r"/(?:p|reel|tv|share/(?:p|reel))/([A-Za-z0-9_-]+)", url)
+        if shortcode_match:
+            shortcode = shortcode_match.group(1)
+            logger.info("yt-dlp produced no video. Attempting instaloader direct CDN video download for %s...", shortcode)
+            video_path, fb_caption, fb_title = _download_video_instaloader_fallback(shortcode, tmp_path)
+            if fb_caption and not caption:
+                caption = fb_caption
+            if fb_title and not title:
+                title = fb_title
+
+    # ── Step 5: Final metadata scrape if caption/title still missing ──
     if not caption and not title:
-        shortcode_match = re.search(r"/(?:p|reel|tv)/([A-Za-z0-9_-]+)", url)
+        shortcode_match = re.search(r"/(?:p|reel|tv|share/(?:p|reel))/([A-Za-z0-9_-]+)", url)
         if shortcode_match:
             shortcode = shortcode_match.group(1)
             caption, title = _extract_caption_fallback(shortcode, url)
@@ -175,6 +187,33 @@ def download_reel(url: str) -> DownloadResult:
         title=title,
         temp_dir=tmp,
     )
+
+
+def _download_video_instaloader_fallback(shortcode: str, tmp_path: Path) -> tuple[Path | None, str, str]:
+    """Fallback video and metadata extraction using instaloader direct CDN stream."""
+    try:
+        import instaloader
+        import httpx
+
+        L = instaloader.Instaloader()
+        post = instaloader.Post.from_shortcode(L.context, shortcode)
+        caption = post.caption or ""
+        title = post.title or f"Video by @{post.owner_username}"
+
+        if post.is_video and post.video_url:
+            target_file = tmp_path / f"{shortcode}.mp4"
+            logger.info("Downloading video stream directly from Instagram CDN: %s...", post.video_url[:80])
+            with httpx.Client(timeout=60.0, follow_redirects=True) as client:
+                resp = client.get(post.video_url)
+                if resp.status_code == 200 and len(resp.content) > 1000:
+                    target_file.write_bytes(resp.content)
+                    logger.info("Successfully downloaded video via CDN fallback (%d bytes) -> %s", len(resp.content), target_file)
+                    return target_file, caption, title
+
+        return None, caption, title
+    except Exception as exc:
+        logger.warning("Instaloader video fallback failed for %s: %s", shortcode, exc)
+        return None, "", ""
 
 
 def _extract_caption_fallback(shortcode: str, url: str) -> tuple[str, str]:
