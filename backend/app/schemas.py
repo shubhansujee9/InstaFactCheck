@@ -69,6 +69,43 @@ class Claim(BaseModel):
     )
 
 
+class MediaForensics(BaseModel):
+    """Forensic and multimodal video analysis metadata."""
+
+    is_likely_ai_generated: bool = Field(
+        default=False,
+        description="True if visual/audio indicators suggest synthetic AI generation or deepfake",
+    )
+    ai_confidence: str = Field(
+        default="none",
+        description="Confidence in AI detection: 'high', 'medium', 'low', or 'none'",
+    )
+    ai_indicators: list[str] = Field(
+        default_factory=list,
+        description="Specific forensic anomalies found (e.g. skin morphing, unnatural speech cadence)",
+    )
+    visual_summary: str | None = Field(
+        default=None,
+        description="Description of what is visually seen in the video frames",
+    )
+    on_screen_text: list[str] = Field(
+        default_factory=list,
+        description="Text overlays, banners, or subtitles detected in video frames",
+    )
+    content_genre: str | None = Field(
+        default=None,
+        description="Detected media genre: e.g. 'news_report', 'satire_comedy', 'speech_clip', 'meme'",
+    )
+    is_selectively_clipped: bool = Field(
+        default=False,
+        description="True if video appears trimmed or cut from a larger speech/event altering its meaning",
+    )
+    original_context_note: str | None = Field(
+        default=None,
+        description="Context regarding the original full-length event or source if identified",
+    )
+
+
 # ---------------------------------------------------------------------------
 # Top-level response
 # ---------------------------------------------------------------------------
@@ -81,6 +118,18 @@ class AnalyzeResponse(BaseModel):
     )
     overall_verdict: Verdict = Field(
         ..., description="Aggregate verdict across all claims"
+    )
+    caption_summary: str | None = Field(
+        default=None,
+        description="Summary of what the caption / poster claims",
+    )
+    video_actual_context: str | None = Field(
+        default=None,
+        description="What the video actually shows and discusses in reality",
+    )
+    forensics: MediaForensics | None = Field(
+        default=None,
+        description="Forensic, deepfake, and visual analysis details",
     )
     has_caption_video_mismatch: bool = Field(
         default=False,

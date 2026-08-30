@@ -9,7 +9,7 @@ from collections import Counter
 from .claim_extractor import extract_claims
 from .downloader import download_reel
 from .fact_checker import check_claim
-from .schemas import AnalyzeResponse, Verdict
+from .schemas import AnalyzeResponse, MediaForensics, Verdict
 from .transcriber import get_transcript
 
 logger = logging.getLogger(__name__)
@@ -66,30 +66,48 @@ async def analyze_reel(url: str) -> AnalyzeResponse:
         dl = download_reel(url)
         temp_dir = dl.temp_dir
 
-        # ── Step 2: Transcribe ───────────────────────────────────────
+        # ── Step 2: Multimodal Video & Audio Analysis ────────────────
         transcript = ""
+        forensics = MediaForensics()
         if dl.video_path and dl.video_path.exists():
-            logger.info("Step 2/5: Transcribing video audio ...")
+            logger.info("Step 2/5: Analyzing video audio & visual frames ...")
             try:
                 transcript = get_transcript(dl.video_path)
             except Exception as exc:
                 logger.warning("Transcription failed (%s). Continuing with caption metadata.", exc)
                 transcript = ""
+
+            try:
+                from app.video_analyzer import analyze_video_frames
+                forensics = analyze_video_frames(dl.video_path)
+            except Exception as exc:
+                logger.warning("Visual forensic analysis error (%s)", exc)
+                forensics = MediaForensics()
         else:
-            logger.info("Step 2/5: No video audio stream (photo/carousel/text post). Using post caption.")
+            logger.info("Step 2/5: No video stream (photo/carousel/text post). Using post caption.")
 
         # ── Step 3: Extract claims & check consistency ───────────────
         logger.info("Step 3/5: Extracting factual claims & checking consistency...")
-        extraction_res = extract_claims(dl.caption, transcript)
+        extraction_res = extract_claims(
+            caption=dl.caption,
+            transcript=transcript,
+            visual_summary=forensics.visual_summary,
+            on_screen_text=forensics.on_screen_text,
+        )
         raw_claims = extraction_res.get("claims", [])
         has_mismatch = extraction_res.get("has_caption_video_mismatch", False)
         mismatch_summary = extraction_res.get("mismatch_summary")
+        caption_summary = extraction_res.get("caption_summary")
+        video_actual_context = extraction_res.get("video_actual_context")
 
         if not raw_claims:
             logger.info("No verifiable claims found — returning summary-only report")
             return AnalyzeResponse(
                 overall_summary=_build_no_claims_summary(dl.caption, transcript),
                 overall_verdict=Verdict.UNVERIFIABLE,
+                caption_summary=caption_summary,
+                video_actual_context=video_actual_context,
+                forensics=forensics,
                 has_caption_video_mismatch=has_mismatch,
                 mismatch_summary=mismatch_summary,
                 claims=[],
@@ -122,6 +140,9 @@ async def analyze_reel(url: str) -> AnalyzeResponse:
         return AnalyzeResponse(
             overall_summary=overall_summary,
             overall_verdict=overall_verdict,
+            caption_summary=caption_summary,
+            video_actual_context=video_actual_context,
+            forensics=forensics,
             has_caption_video_mismatch=has_mismatch,
             mismatch_summary=mismatch_summary,
             claims=checked_claims,
