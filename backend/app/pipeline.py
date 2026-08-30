@@ -78,15 +78,20 @@ async def analyze_reel(url: str) -> AnalyzeResponse:
         else:
             logger.info("Step 2/5: No video audio stream (photo/carousel/text post). Using post caption.")
 
-        # ── Step 3: Extract claims ───────────────────────────────────
-        logger.info("Step 3/5: Extracting factual claims ...")
-        raw_claims = extract_claims(dl.caption, transcript)
+        # ── Step 3: Extract claims & check consistency ───────────────
+        logger.info("Step 3/5: Extracting factual claims & checking consistency...")
+        extraction_res = extract_claims(dl.caption, transcript)
+        raw_claims = extraction_res.get("claims", [])
+        has_mismatch = extraction_res.get("has_caption_video_mismatch", False)
+        mismatch_summary = extraction_res.get("mismatch_summary")
 
         if not raw_claims:
             logger.info("No verifiable claims found — returning summary-only report")
             return AnalyzeResponse(
                 overall_summary=_build_no_claims_summary(dl.caption, transcript),
                 overall_verdict=Verdict.UNVERIFIABLE,
+                has_caption_video_mismatch=has_mismatch,
+                mismatch_summary=mismatch_summary,
                 claims=[],
                 video_title=dl.title or None,
                 transcript_snippet=transcript[:200] if transcript else None,
@@ -94,22 +99,31 @@ async def analyze_reel(url: str) -> AnalyzeResponse:
 
         # ── Step 4: Fact-check each claim concurrently ────────────────
         logger.info("Step 4/5: Fact-checking %d claims in parallel...", len(raw_claims))
-        valid_claims = [r.get("claim_text", "") for r in raw_claims if r.get("claim_text", "")]
         
+        def _check_wrapper(raw_item: dict):
+            return check_claim(
+                claim_text=raw_item.get("claim_text", ""),
+                source_origin=raw_item.get("source_origin", "content"),
+                mismatch_warning=raw_item.get("mismatch_warning"),
+            )
+
         checked_claims = []
-        if valid_claims:
+        valid_items = [r for r in raw_claims if r.get("claim_text")]
+        if valid_items:
             import concurrent.futures
-            with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(valid_claims), 6)) as executor:
-                checked_claims = list(executor.map(check_claim, valid_claims))
+            with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(valid_items), 6)) as executor:
+                checked_claims = list(executor.map(_check_wrapper, valid_items))
 
         # ── Step 5: Aggregate ────────────────────────────────────────
         logger.info("Step 5/5: Aggregating report ...")
-        overall_verdict = _aggregate_verdict(checked_claims)
-        overall_summary = _build_summary(checked_claims, dl.caption, transcript)
+        overall_verdict = _aggregate_verdict(checked_claims, has_mismatch)
+        overall_summary = _build_summary(checked_claims, dl.caption, transcript, mismatch_summary)
 
         return AnalyzeResponse(
             overall_summary=overall_summary,
             overall_verdict=overall_verdict,
+            has_caption_video_mismatch=has_mismatch,
+            mismatch_summary=mismatch_summary,
             claims=checked_claims,
             video_title=dl.title or None,
             transcript_snippet=transcript[:200] if transcript else None,
@@ -124,10 +138,11 @@ async def analyze_reel(url: str) -> AnalyzeResponse:
                 pass
 
 
-def _aggregate_verdict(claims: list) -> Verdict:
+def _aggregate_verdict(claims: list, has_mismatch: bool = False) -> Verdict:
     """Determine an overall verdict from individual claim verdicts.
 
-    Simple heuristic: if any claim is false → false; if most are true → true; etc.
+    If the caption misrepresents or contradicts the video (has_mismatch),
+    the overall verdict is adjusted to at least MISLEADING.
     """
     if not claims:
         return Verdict.UNVERIFIABLE
@@ -135,10 +150,14 @@ def _aggregate_verdict(claims: list) -> Verdict:
     counts = Counter(c.verdict for c in claims)
     total = len(claims)
 
-    # If any claim is false, overall is at least misleading
+    # If any claim is false, overall is false or misleading
     if counts.get(Verdict.FALSE, 0) > 0:
         if counts[Verdict.FALSE] > total / 2:
             return Verdict.FALSE
+        return Verdict.MISLEADING
+
+    # If there is a major discrepancy between the caption and the video
+    if has_mismatch:
         return Verdict.MISLEADING
 
     # If all true
@@ -157,12 +176,18 @@ def _aggregate_verdict(claims: list) -> Verdict:
     return Verdict.MIXED
 
 
-def _build_summary(claims: list, caption: str, transcript: str) -> str:
-    """Build a brief overall summary from the checked claims."""
+def _build_summary(
+    claims: list, caption: str, transcript: str, mismatch_summary: str | None = None
+) -> str:
+    """Build a brief overall summary from the checked claims and mismatch notes."""
     total = len(claims)
     counts = Counter(c.verdict.value for c in claims)
 
-    parts = [f"This video contained {total} verifiable claim{'s' if total != 1 else ''}."]
+    parts = []
+    if mismatch_summary:
+        parts.append(f"⚠️ Context Discrepancy Detected: {mismatch_summary}")
+
+    parts.append(f"This content contained {total} verifiable claim{'s' if total != 1 else ''}.")
 
     verdict_descriptions = []
     for v, label in [

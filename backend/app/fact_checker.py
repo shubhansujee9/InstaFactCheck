@@ -60,8 +60,13 @@ def search_evidence(claim_text: str) -> list[dict]:
     return results
 
 
-def evaluate_claim(claim_text: str, evidence: list[dict]) -> Claim:
-    """Use configured LLM to evaluate a claim against search evidence.
+def evaluate_claim(
+    claim_text: str,
+    evidence: list[dict],
+    source_origin: str = "content",
+    mismatch_warning: str | None = None,
+) -> Claim:
+    """Use configured LLM to evaluate a claim against search evidence and contextual facts.
 
     Returns a fully populated Claim object.
     """
@@ -71,15 +76,16 @@ def evaluate_claim(claim_text: str, evidence: list[dict]) -> Claim:
 
     base_url = os.environ.get("OPENAI_BASE_URL")
     client = openai.OpenAI(api_key=api_key, **(dict(base_url=base_url) if base_url else {}))
-    model = os.environ.get("OPENAI_MODEL", "auto/best-chat")
+    model = os.environ.get("OPENAI_MODEL", "gemini-flash-latest")
 
     # Format evidence for the prompt
     evidence_text = _format_evidence(evidence)
 
-    user_content = (
-        f"=== CLAIM ===\n{claim_text}\n\n"
-        f"=== EVIDENCE ===\n{evidence_text}"
-    )
+    parts = [f"=== CLAIM ===\n{claim_text}\n(Claim Origin: {source_origin})"]
+    if mismatch_warning:
+        parts.append(f"=== CONTEXTUAL DISCREPANCY WARNING ===\n{mismatch_warning}")
+    parts.append(f"=== EVIDENCE ===\n{evidence_text}")
+    user_content = "\n\n".join(parts)
 
     logger.info("Evaluating claim with %s ...", model)
 
@@ -128,6 +134,8 @@ def evaluate_claim(claim_text: str, evidence: list[dict]) -> Claim:
         claim_text=claim_text,
         verdict=verdict,
         explanation=data.get("explanation", "Could not determine verdict."),
+        source_origin=source_origin,
+        mismatch_warning=mismatch_warning,
         sources=sources,
     )
 
@@ -150,10 +158,19 @@ def _parse_json_safely(raw: str) -> dict:
         return {}
 
 
-def check_claim(claim_text: str) -> Claim:
+def check_claim(
+    claim_text: str,
+    source_origin: str = "content",
+    mismatch_warning: str | None = None,
+) -> Claim:
     """Full pipeline for a single claim: search → evaluate → Claim object."""
     evidence = search_evidence(claim_text)
-    return evaluate_claim(claim_text, evidence)
+    return evaluate_claim(
+        claim_text=claim_text,
+        evidence=evidence,
+        source_origin=source_origin,
+        mismatch_warning=mismatch_warning,
+    )
 
 
 def _format_evidence(results: list[dict]) -> str:

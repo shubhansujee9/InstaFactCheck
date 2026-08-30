@@ -49,12 +49,20 @@ class Source(BaseModel):
 
 
 class Claim(BaseModel):
-    """A single factual claim extracted from the video, with its verdict."""
+    """A single factual claim extracted from the video or post, with its verdict."""
 
     claim_text: str = Field(..., description="The factual claim as stated or implied")
     verdict: Verdict = Field(..., description="Fact-check verdict for this claim")
     explanation: str = Field(
         ..., description="Brief explanation of why this verdict was reached"
+    )
+    source_origin: str = Field(
+        default="content",
+        description="Where the claim originated: 'caption', 'audio_transcript', or 'both'",
+    )
+    mismatch_warning: str | None = Field(
+        default=None,
+        description="Warning if this claim is contradicted by the video audio or falsely attributed",
     )
     sources: list[Source] = Field(
         default_factory=list, description="Evidence sources for this claim"
@@ -73,6 +81,14 @@ class AnalyzeResponse(BaseModel):
     )
     overall_verdict: Verdict = Field(
         ..., description="Aggregate verdict across all claims"
+    )
+    has_caption_video_mismatch: bool = Field(
+        default=False,
+        description="True if the post caption contradicts or misrepresents the actual video audio content",
+    )
+    mismatch_summary: str | None = Field(
+        default=None,
+        description="Explanation of the discrepancy between caption and video content if any",
     )
     claims: list[Claim] = Field(
         default_factory=list, description="Individual claim verdicts with sources"

@@ -659,6 +659,13 @@ function renderReport(data) {
       <div class="card-label"><span class="icon">📋</span> Summary</div>
       <p>${esc(data.overall_summary)}</p>
     </div>
+
+    ${data.has_caption_video_mismatch ? `
+      <div class="card" style="background: rgba(255, 87, 34, 0.08); border-color: rgba(255, 87, 34, 0.3);">
+        <div class="card-label" style="color: #ff5722;"><span class="icon">⚠️</span> Caption / Video Discrepancy Alert</div>
+        <p style="color: #ffccbc;">${esc(data.mismatch_summary || 'The caption frames the video out of context or asserts claims not supported by the actual video audio.')}</p>
+      </div>
+    ` : ''}
   `;
 
   if (data.transcript_snippet) {
@@ -676,20 +683,39 @@ function renderReport(data) {
       const cv = VERDICT_MAP[claim.verdict] || VERDICT_MAP.unverifiable;
       const cc = cv.color;
       const id = `claim-${i}`;
+      
+      const originLabels = {
+        caption: '📝 Caption',
+        audio_transcript: '🎙️ Spoken in Video',
+        both: '🎬 Caption & Video',
+        content: '📄 Content',
+      };
+      const originText = originLabels[claim.source_origin] || originLabels.content;
+
       html += `
         <div class="claim-card" style="border-color:${cc}18">
           <div class="claim-header" onclick="toggleClaim('${id}')">
             <div class="claim-num" style="background:${cc}15; color:${cc}">${i + 1}</div>
             <div class="claim-body">
               <div class="claim-text">${esc(claim.claim_text)}</div>
-              <div class="claim-badge" style="background:${cc}15; color:${cc}; border-color:${cc}30">
-                ${cv.emoji} ${cv.label}
+              <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+                <div class="claim-badge" style="background:${cc}15; color:${cc}; border-color:${cc}30">
+                  ${cv.emoji} ${cv.label}
+                </div>
+                <div class="claim-badge" style="background:rgba(255,255,255,0.06); color:var(--text-secondary); border-color:var(--border);">
+                  ${originText}
+                </div>
               </div>
             </div>
             <div class="claim-arrow" id="${id}-arrow">▾</div>
           </div>
           <div class="claim-detail" id="${id}">
             <div class="claim-detail-inner">
+              ${claim.mismatch_warning ? `
+                <div style="background:rgba(255,87,34,0.1); border-left:3px solid #ff5722; padding:10px 12px; border-radius:6px; margin-bottom:12px; font-size:13px; color:#ffccbc;">
+                  ⚠️ <strong>Context Warning:</strong> ${esc(claim.mismatch_warning)}
+                </div>
+              ` : ''}
               <div class="detail-label">Explanation</div>
               <div class="detail-text">${esc(claim.explanation)}</div>
               ${claim.sources && claim.sources.length > 0 ? `
