@@ -660,7 +660,7 @@ function renderReport(data) {
       <p>${esc(data.overall_summary)}</p>
     </div>
 
-    ${(data.caption_summary || data.video_actual_context) ? `
+    ${(data.caption_summary || data.video_actual_context || data.original_full_video_url) ? `
       <div class="card" style="background: rgba(13, 71, 161, 0.08); border-color: rgba(33, 150, 243, 0.25);">
         <div class="card-label" style="color: #64b5f6;"><span class="icon">🎬</span> Video vs Caption Context Breakdown</div>
         <div style="display: flex; flex-direction: column; gap: 10px; margin-top: 6px;">
@@ -674,6 +674,18 @@ function renderReport(data) {
               <strong style="color: #81c784;">🎥 Actual Video Content:</strong> ${esc(data.video_actual_context)}
             </div>
           ` : ''}
+          <div style="display: flex; gap: 10px; flex-wrap: wrap; margin-top: 6px;">
+            ${data.original_full_video_url ? `
+              <a href="${esc(data.original_full_video_url)}" target="_blank" rel="noopener" class="claim-badge" style="background: rgba(255, 0, 0, 0.15); color: #ff5252; border-color: rgba(255, 0, 0, 0.35); text-decoration: none; padding: 6px 12px; font-weight: 600;">
+                ▶️ Watch Full Source: ${esc(data.original_full_video_title || 'Original Video')}
+              </a>
+            ` : ''}
+            ${data.instagram_url ? `
+              <a href="${esc(data.instagram_url)}" target="_blank" rel="noopener" class="claim-badge" style="background: rgba(225, 48, 108, 0.15); color: #e1306c; border-color: rgba(225, 48, 108, 0.35); text-decoration: none; padding: 6px 12px; font-weight: 600;">
+                📸 Open Reel on Instagram
+              </a>
+            ` : ''}
+          </div>
         </div>
       </div>
     ` : ''}

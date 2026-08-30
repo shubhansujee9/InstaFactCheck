@@ -142,6 +142,18 @@ class AnalyzeResponse(BaseModel):
     claims: list[Claim] = Field(
         default_factory=list, description="Individual claim verdicts with sources"
     )
+    original_full_video_url: str | None = Field(
+        default=None,
+        description="Direct link to watch the full original source video/speech/interview on YouTube or official site",
+    )
+    original_full_video_title: str | None = Field(
+        default=None,
+        description="Title or event name of the full original source video",
+    )
+    instagram_url: str | None = Field(
+        default=None,
+        description="Original Instagram reel/post URL",
+    )
     video_title: str | None = Field(
         None, description="Title/caption of the reel if available"
     )

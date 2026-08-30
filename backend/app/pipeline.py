@@ -68,21 +68,51 @@ async def analyze_reel(url: str) -> AnalyzeResponse:
 
         # ── Step 2: Multimodal Video & Audio Analysis ────────────────
         transcript = ""
+        speech_summary = ""
+        speakers: list[str] = []
         forensics = MediaForensics()
         if dl.video_path and dl.video_path.exists():
-            logger.info("Step 2/5: Analyzing video audio & visual frames ...")
-            try:
-                transcript = get_transcript(dl.video_path)
-            except Exception as exc:
-                logger.warning("Transcription failed (%s). Continuing with caption metadata.", exc)
-                transcript = ""
+            logger.info("Step 2/5: Analyzing video with Gemini native audio/video model...")
 
+            # Primary: Gemini native multimodal (hears speech, sees visuals)
+            gemini_analysis = None
             try:
-                from app.video_analyzer import analyze_video_frames
-                forensics = analyze_video_frames(dl.video_path)
+                from app.gemini_media_analyzer import analyze_video_with_gemini
+                gemini_analysis = analyze_video_with_gemini(dl.video_path)
             except Exception as exc:
-                logger.warning("Visual forensic analysis error (%s)", exc)
-                forensics = MediaForensics()
+                logger.warning("Gemini media analysis error (%s)", exc)
+
+            if gemini_analysis and gemini_analysis.transcript:
+                transcript = gemini_analysis.transcript
+                speech_summary = gemini_analysis.speech_summary
+                speakers = gemini_analysis.speakers
+                forensics = MediaForensics(
+                    visual_summary=gemini_analysis.visual_summary,
+                    on_screen_text=gemini_analysis.on_screen_text,
+                    content_genre=gemini_analysis.content_genre,
+                    is_selectively_clipped=gemini_analysis.is_selectively_clipped,
+                    original_context_note=gemini_analysis.original_context_note,
+                )
+                logger.info(
+                    "Using Gemini transcript (%d chars), speakers: %s",
+                    len(transcript),
+                    speakers,
+                )
+            else:
+                # Fallback: local Whisper + keyframe analysis
+                logger.info("Gemini unavailable — falling back to Whisper + keyframes...")
+                try:
+                    transcript = get_transcript(dl.video_path)
+                except Exception as exc:
+                    logger.warning("Transcription failed (%s). Continuing with caption metadata.", exc)
+                    transcript = ""
+
+                try:
+                    from app.video_analyzer import analyze_video_frames
+                    forensics = analyze_video_frames(dl.video_path)
+                except Exception as exc:
+                    logger.warning("Visual forensic analysis error (%s)", exc)
+                    forensics = MediaForensics()
         else:
             logger.info("Step 2/5: No video stream (photo/carousel/text post). Using post caption.")
 
@@ -93,6 +123,8 @@ async def analyze_reel(url: str) -> AnalyzeResponse:
             transcript=transcript,
             visual_summary=forensics.visual_summary,
             on_screen_text=forensics.on_screen_text,
+            speech_summary=speech_summary or None,
+            speakers=speakers or None,
         )
         raw_claims = extraction_res.get("claims", [])
         has_mismatch = extraction_res.get("has_caption_video_mismatch", False)
@@ -100,16 +132,35 @@ async def analyze_reel(url: str) -> AnalyzeResponse:
         caption_summary = extraction_res.get("caption_summary")
         video_actual_context = extraction_res.get("video_actual_context")
 
+        # When caption mismatches video, drop caption-only claims
+        if has_mismatch:
+            before = len(raw_claims)
+            raw_claims = [
+                c for c in raw_claims
+                if c.get("source_origin") != "caption"
+            ]
+            if before != len(raw_claims):
+                logger.info(
+                    "Dropped %d caption-only claims due to caption/video mismatch",
+                    before - len(raw_claims),
+                )
+
+        original_full_video_title = extraction_res.get("original_full_video_title")
+        original_full_video_url = extraction_res.get("original_full_video_url")
+
         if not raw_claims:
             logger.info("No verifiable claims found — returning summary-only report")
             return AnalyzeResponse(
-                overall_summary=_build_no_claims_summary(dl.caption, transcript),
+                overall_summary=_build_no_claims_summary(dl.caption, transcript, speech_summary),
                 overall_verdict=Verdict.UNVERIFIABLE,
                 caption_summary=caption_summary,
                 video_actual_context=video_actual_context,
                 forensics=forensics,
                 has_caption_video_mismatch=has_mismatch,
                 mismatch_summary=mismatch_summary,
+                original_full_video_url=original_full_video_url,
+                original_full_video_title=original_full_video_title,
+                instagram_url=url,
                 claims=[],
                 video_title=dl.title or None,
                 transcript_snippet=transcript[:200] if transcript else None,
@@ -145,6 +196,9 @@ async def analyze_reel(url: str) -> AnalyzeResponse:
             forensics=forensics,
             has_caption_video_mismatch=has_mismatch,
             mismatch_summary=mismatch_summary,
+            original_full_video_url=original_full_video_url,
+            original_full_video_title=original_full_video_title,
+            instagram_url=url,
             claims=checked_claims,
             video_title=dl.title or None,
             transcript_snippet=transcript[:200] if transcript else None,
@@ -229,8 +283,14 @@ def _build_summary(
     return " ".join(parts)
 
 
-def _build_no_claims_summary(caption: str, transcript: str) -> str:
+def _build_no_claims_summary(caption: str, transcript: str, speech_summary: str = "") -> str:
     """Build a summary when no verifiable claims were found."""
+    if speech_summary:
+        return (
+            f"The video shows: {speech_summary} "
+            "No specific verifiable factual claims were identified in the spoken content. "
+            "The content may be primarily opinion-based, ceremonial, or personal narrative."
+        )
     content_source = "caption and transcript" if caption and transcript else (
         "caption" if caption else "transcript" if transcript else "content"
     )

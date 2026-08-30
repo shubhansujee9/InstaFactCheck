@@ -13,39 +13,41 @@ logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = """\
 You are an expert fact-checking and media forensic analyst. You will receive:
-1. The post caption/text written by the user.
-2. The audio transcript spoken in the video (if available).
-3. The visual scene description and on-screen text overlays (if available).
+1. The post caption/text written by the user (SECONDARY — may be unrelated clickbait).
+2. The audio transcript spoken in the video (PRIMARY source of truth).
+3. The visual scene description and on-screen text overlays (PRIMARY).
+
+CRITICAL PRIORITY RULE:
+- The VIDEO (audio transcript + visuals) is the PRIMARY source of truth.
+- The caption is often unrelated commentary, hashtags, or misleading framing added by the poster.
+- When caption content differs from or is unrelated to the video, IGNORE caption claims for fact-checking.
+- Only fact-check what is actually SAID or SHOWN in the video.
+- Set `has_caption_video_mismatch` to true when caption misrepresents, falsely frames, or is unrelated to video content.
+- When mismatch is true, extract claims ONLY from audio_transcript and visual_overlay — NOT from caption.
 
 Your job:
 1. Context Breakdown:
+1. Context Breakdown & Source Identification:
    - `caption_summary`: 1 sentence summarizing what the caption/poster is asserting.
-   - `video_actual_context`: 1-2 sentences explaining what the video actually shows and discusses in reality.
+   - `video_actual_context`: 2-3 sentences explaining what the video ACTUALLY shows and what was SAID.
+   - `original_full_video_title`: The name of the original full-length interview, speech, press conference, or video (e.g., 'Narendra Modi with Akshay Kumar Interview (2019)', 'Vogue World 2024 Livestream', or null if amateur/unknown).
+   - `original_full_video_url`: A direct link or YouTube search URL to watch the full uncut video (e.g., 'https://www.youtube.com/results?search_query=Narendra+Modi+Akshay+Kumar+Interview+Canvas+Shoes' or direct YouTube URL, or null if unknown).
 
 2. Cross-Modal Consistency Check:
-   - Carefully check if the caption MATCHES or CONTRADICTS what is actually in the video (audio or visuals).
-   - Detect false context / clickbait (e.g. caption says "War breaks out" but video is an old drill or video game; or caption misattributes speech).
-   - Set `has_caption_video_mismatch` to true if the caption misrepresents, falsely frames, or contradicts what is in the video.
+   - Carefully check if the caption MATCHES or CONTRADICTS what is actually in the video.
+   - Set `has_caption_video_mismatch` to true if the caption misrepresents, falsely frames, or is unrelated to the video.
    - Provide `mismatch_summary` explaining the discrepancy.
 
 3. Claim Extraction:
-   - Extract discrete, verifiable factual claims.
-   - For each claim, identify its `source_origin`:
-     - "caption": asserted only in the caption/text
-     - "audio_transcript": spoken in the video audio
-     - "visual_overlay": shown in on-screen video text/graphics
-     - "both": mentioned in both caption and video
-   - If a claim from the caption is contradicted by the video or falsely attributed to the video, add a `mismatch_warning`.
-
-Rules:
-- Only extract claims that can be verified against facts (statistics, named events, quotes, historical/scientific claims).
-- Do NOT extract opinions or subjective banter.
-- Return ONLY valid JSON.
+   - Extract discrete, verifiable factual claims FROM THE VIDEO (speech and on-screen text).
+   - For each claim, identify its `source_origin` ('audio_transcript', 'visual_overlay', 'caption', 'both').
 
 Return a JSON object with this schema:
 {
   "caption_summary": "string",
   "video_actual_context": "string",
+  "original_full_video_title": "string or null",
+  "original_full_video_url": "string or null",
   "has_caption_video_mismatch": false,
   "mismatch_summary": "string or null",
   "claims": [
@@ -64,6 +66,8 @@ def extract_claims(
     transcript: str,
     visual_summary: str | None = None,
     on_screen_text: list[str] | None = None,
+    speech_summary: str | None = None,
+    speakers: list[str] | None = None,
 ) -> dict:
     """Extract factual claims, context breakdown, and cross-modal consistency analysis.
 
@@ -82,7 +86,9 @@ def extract_claims(
     client = openai.OpenAI(api_key=api_key, **(dict(base_url=base_url) if base_url else {}))
     model = os.environ.get("OPENAI_MODEL", "gemini-flash-latest")
 
-    user_content = _build_user_message(caption, transcript, visual_summary, on_screen_text)
+    user_content = _build_user_message(
+        caption, transcript, visual_summary, on_screen_text, speech_summary, speakers
+    )
     if not user_content.strip():
         logger.warning("No content provided — returning empty claims")
         return {
@@ -127,10 +133,18 @@ def extract_claims(
     video_actual_context = data.get("video_actual_context")
     
     logger.info("Extracted %d claims (mismatch detected: %s)", len(claims), has_mismatch)
+    caption_summary = data.get("caption_summary")
+    video_actual_context = data.get("video_actual_context")
+    original_full_video_title = data.get("original_full_video_title")
+    original_full_video_url = data.get("original_full_video_url")
+    
+    logger.info("Extracted %d claims (mismatch detected: %s, full video: %s)", len(claims), has_mismatch, original_full_video_title)
     return {
         "claims": claims,
         "caption_summary": caption_summary,
         "video_actual_context": video_actual_context,
+        "original_full_video_title": original_full_video_title,
+        "original_full_video_url": original_full_video_url,
         "has_caption_video_mismatch": has_mismatch,
         "mismatch_summary": mismatch_summary,
     }
@@ -160,15 +174,27 @@ def _build_user_message(
     transcript: str,
     visual_summary: str | None = None,
     on_screen_text: list[str] | None = None,
+    speech_summary: str | None = None,
+    speakers: list[str] | None = None,
 ) -> str:
     """Build the user message combining caption, transcript, and visual scene analysis."""
     parts: list[str] = []
-    if caption.strip():
-        parts.append(f"=== VIDEO CAPTION ===\n{caption.strip()}")
+
+    # Video content first (primary)
+    if speakers:
+        parts.append(f"=== IDENTIFIED SPEAKERS ===\n{', '.join(speakers)}")
+    if speech_summary and speech_summary.strip():
+        parts.append(f"=== SPEECH SUMMARY (what was actually said) ===\n{speech_summary.strip()}")
     if transcript.strip():
-        parts.append(f"=== AUDIO TRANSCRIPT ===\n{transcript.strip()}")
+        parts.append(f"=== AUDIO TRANSCRIPT (PRIMARY — verbatim speech) ===\n{transcript.strip()}")
     if visual_summary and visual_summary.strip():
-        parts.append(f"=== VISUAL SCENE FORENSICS ===\n{visual_summary.strip()}")
+        parts.append(f"=== VISUAL SCENE ===\n{visual_summary.strip()}")
     if on_screen_text:
         parts.append(f"=== ON-SCREEN TEXT OVERLAYS ===\n" + "\n".join(f"- {t}" for t in on_screen_text if t))
+
+    # Caption last (secondary — may be misleading)
+    if caption.strip():
+        parts.append(
+            f"=== POST CAPTION (SECONDARY — may be unrelated to video) ===\n{caption.strip()}"
+        )
     return "\n\n".join(parts)
