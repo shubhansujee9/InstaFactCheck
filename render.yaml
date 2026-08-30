@@ -13,3 +13,5 @@ services:
         value: https://generativelanguage.googleapis.com/v1beta/openai/
       - key: OPENAI_MODEL
         value: gemini-flash-latest
+      - key: GEMINI_MEDIA_MODEL
+        value: gemini-2.5-flash
