@@ -33,31 +33,53 @@ Return a JSON object with this schema:
 
 
 def search_evidence(claim_text: str) -> list[dict]:
-    """Search the web for evidence about a claim using Tavily.
+    """Search the web for live evidence about a claim.
 
+    Uses Tavily if TAVILY_API_KEY is present; otherwise falls back to free DuckDuckGo search.
     Returns a list of search result dicts with ``title``, ``url``, ``content``.
     """
-    api_key = os.environ.get("TAVILY_API_KEY")
-    if not api_key:
-        logger.info("TAVILY_API_KEY not set — skipping web search, using LLM knowledge only")
-        return []
+    # 1. Try Tavily if configured
+    tavily_key = os.environ.get("TAVILY_API_KEY")
+    if tavily_key:
+        try:
+            client = TavilyClient(api_key=tavily_key)
+            logger.info("Searching Tavily for claim: %s", claim_text[:80])
+            response = client.search(
+                query=f"fact check: {claim_text}",
+                search_depth="advanced",
+                max_results=5,
+            )
+            results = response.get("results", [])
+            logger.info("Tavily returned %d search results", len(results))
+            return results
+        except Exception as exc:
+            logger.warning("Tavily search failed (%s), falling back to DuckDuckGo...", exc)
 
-    client = TavilyClient(api_key=api_key)
-    logger.info("Searching evidence for claim: %s", claim_text[:80])
-
+    # 2. Free live web search via DuckDuckGo (0 API keys needed)
     try:
-        response = client.search(
-            query=f"fact check: {claim_text}",
-            search_depth="advanced",
-            max_results=5,
-        )
-    except Exception as exc:
-        logger.error("Tavily search failed: %s", exc)
-        return []
+        try:
+            from ddgs import DDGS
+        except ImportError:
+            from duckduckgo_search import DDGS
 
-    results = response.get("results", [])
-    logger.info("Got %d search results", len(results))
-    return results
+        query = f"{claim_text}"
+        logger.info("Performing free live web search (DDGS) for claim: %s", claim_text[:80])
+        ddgs = DDGS()
+        raw_results = list(ddgs.text(query, max_results=5))
+        results = [
+            {
+                "title": r.get("title", ""),
+                "url": r.get("href", ""),
+                "content": r.get("body", ""),
+            }
+            for r in raw_results
+            if r.get("href")
+        ]
+        logger.info("Free live web search found %d results", len(results))
+        return results
+    except Exception as exc:
+        logger.warning("Live web search unavailable (%s) — using LLM knowledge", exc)
+        return []
 
 
 def evaluate_claim(
