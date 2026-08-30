@@ -66,31 +66,66 @@ def extract_audio(video_path: Path) -> Path:
     return audio_path
 
 
-def transcribe_audio(audio_path: Path) -> str:
-    """Transcribe an audio file using OpenAI Whisper API.
+_whisper_model_instance = None
 
-    Returns the transcript text.  Requires OPENAI_API_KEY env var.
+
+def _get_local_whisper_model():
+    """Lazy-load faster-whisper model singleton."""
+    global _whisper_model_instance
+    if _whisper_model_instance is None:
+        try:
+            from faster_whisper import WhisperModel
+            logger.info("Initializing local faster-whisper model (tiny, int8)...")
+            _whisper_model_instance = WhisperModel("tiny", device="cpu", compute_type="int8")
+        except Exception as exc:
+            logger.warning("Could not initialize local faster-whisper (%s)", exc)
+            return None
+    return _whisper_model_instance
+
+
+def transcribe_audio(audio_path: Path) -> str:
+    """Transcribe an audio file using local faster-whisper with OpenAI API fallback.
+
+    Returns the transcript text.
     """
+    # 1. Try local faster-whisper first (free, fast, no external API dependency)
+    model = _get_local_whisper_model()
+    if model is not None:
+        try:
+            logger.info("Transcribing audio with local faster-whisper...")
+            segments, info = model.transcribe(str(audio_path), beam_size=5)
+            transcript = " ".join([seg.text for seg in segments]).strip()
+            if transcript:
+                logger.info("Local Whisper transcription complete (%s, %d chars): %s", info.language, len(transcript), transcript[:100])
+                return transcript
+        except Exception as exc:
+            logger.warning("Local faster-whisper failed (%s), trying cloud API...", exc)
+
+    # 2. Fallback to OpenAI Whisper API
     api_key = os.environ.get("OPENAI_API_KEY")
     if not api_key:
-        raise EnvironmentError("OPENAI_API_KEY is not set")
+        return ""
 
     base_url = os.environ.get("OPENAI_BASE_URL")
-    client = openai.OpenAI(api_key=api_key, **(dict(base_url=base_url) if base_url else {}))
-    model = os.environ.get("WHISPER_MODEL", "whisper-1")
+    # If using Google or other providers that do not support /audio/transcriptions, skip
+    if base_url and "generativelanguage.googleapis.com" in base_url:
+        return ""
 
-    logger.info("Transcribing with Whisper model=%s ...", model)
+    try:
+        client = openai.OpenAI(api_key=api_key, **(dict(base_url=base_url) if base_url else {}))
+        whisper_model = os.environ.get("WHISPER_MODEL", "whisper-1")
+        logger.info("Transcribing with cloud Whisper model=%s ...", whisper_model)
 
-    with open(audio_path, "rb") as audio_file:
-        response = client.audio.transcriptions.create(
-            model=model,
-            file=audio_file,
-            response_format="text",
-        )
-
-    transcript = response.strip() if isinstance(response, str) else str(response).strip()
-    logger.info("Transcript received: %d chars", len(transcript))
-    return transcript
+        with open(audio_path, "rb") as audio_file:
+            response = client.audio.transcriptions.create(
+                model=whisper_model,
+                file=audio_file,
+                response_format="text",
+            )
+        return response.strip() if isinstance(response, str) else str(response).strip()
+    except Exception as exc:
+        logger.warning("Cloud transcription failed (%s)", exc)
+        return ""
 
 
 def get_transcript(video_path: Path) -> str:
