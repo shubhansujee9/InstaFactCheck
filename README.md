@@ -1,6 +1,9 @@
 # 🔍 InstaFactCheck — Instagram Video & Post Fact-Checker
 
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/shubhansujee9/InstaFactCheck)
+
 An end-to-end AI fact-checking application that analyzes Instagram Reels, video posts, and carousel/photo posts. It downloads content, transcribes speech, extracts discrete factual assertions using an LLM, verifies evidence, and returns an interactive fact-check report with color-coded verdict badges, explanations, and citations.
+
 
 ---
 
