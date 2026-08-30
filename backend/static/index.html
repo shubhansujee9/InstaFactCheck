@@ -1,0 +1,739 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>InstaFactCheck</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0a0a10;
+      --surface: #13131d;
+      --surface-hover: #1a1a28;
+      --border: rgba(255,255,255,0.06);
+      --text: #e8e8f0;
+      --text-secondary: rgba(232,232,240,0.55);
+      --primary: #6366f1;
+      --primary-glow: rgba(99,102,241,0.25);
+      --gradient-start: #6366f1;
+      --gradient-end: #8b5cf6;
+      --true: #4caf50;
+      --mostly-true: #8bc34a;
+      --mixed: #ff9800;
+      --misleading: #ff5722;
+      --false: #f44336;
+      --unverifiable: #9e9e9e;
+      --radius: 16px;
+    }
+
+    body {
+      font-family: 'Inter', -apple-system, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    /* ── Header ────────────────────────────────── */
+    header {
+      width: 100%;
+      padding: 20px 24px;
+      text-align: center;
+      border-bottom: 1px solid var(--border);
+      backdrop-filter: blur(12px);
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      background: rgba(10,10,16,0.85);
+    }
+    header h1 {
+      font-size: 20px;
+      font-weight: 800;
+      letter-spacing: -0.5px;
+      background: linear-gradient(135deg, var(--gradient-start), var(--gradient-end));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    /* ── Main ──────────────────────────────────── */
+    main {
+      width: 100%;
+      max-width: 640px;
+      padding: 24px 20px 60px;
+      flex: 1;
+    }
+
+    /* ── Home View ─────────────────────────────── */
+    #home-view {
+      animation: fadeUp 0.5s ease-out;
+    }
+    .hero-icon {
+      width: 88px; height: 88px;
+      margin: 40px auto 28px;
+      display: flex; align-items: center; justify-content: center;
+      border-radius: 24px;
+      background: linear-gradient(135deg, var(--gradient-start), var(--gradient-end));
+      box-shadow: 0 12px 32px var(--primary-glow);
+      font-size: 40px;
+    }
+    .hero-title {
+      text-align: center;
+      font-size: 26px;
+      font-weight: 800;
+      letter-spacing: -0.5px;
+      margin-bottom: 10px;
+    }
+    .hero-subtitle {
+      text-align: center;
+      color: var(--text-secondary);
+      font-size: 15px;
+      line-height: 1.6;
+      margin-bottom: 32px;
+    }
+
+    /* ── Input ─────────────────────────────────── */
+    .input-group {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 32px;
+    }
+    .input-group input {
+      flex: 1;
+      padding: 14px 16px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      color: var(--text);
+      font-family: inherit;
+      font-size: 14px;
+      outline: none;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+    .input-group input:focus {
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px var(--primary-glow);
+    }
+    .input-group input::placeholder { color: var(--text-secondary); }
+    .btn-primary {
+      padding: 14px 22px;
+      background: linear-gradient(135deg, var(--gradient-start), var(--gradient-end));
+      border: none;
+      border-radius: 12px;
+      color: #fff;
+      font-family: inherit;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: transform 0.15s, box-shadow 0.2s;
+    }
+    .btn-primary:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 8px 24px var(--primary-glow);
+    }
+    .btn-primary:active { transform: translateY(0); }
+    .btn-primary:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    /* ── How it works ──────────────────────────── */
+    .how-it-works {
+      background: var(--surface);
+      border-radius: var(--radius);
+      border: 1px solid var(--border);
+      padding: 20px;
+    }
+    .how-it-works h3 {
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--text-secondary);
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      margin-bottom: 16px;
+      text-align: center;
+    }
+    .step-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 8px 0;
+    }
+    .step-icon {
+      width: 36px; height: 36px;
+      border-radius: 10px;
+      background: rgba(99,102,241,0.1);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 16px;
+      flex-shrink: 0;
+    }
+    .step-row span {
+      color: var(--text-secondary);
+      font-size: 14px;
+    }
+
+    /* ── Loading View ──────────────────────────── */
+    #loading-view {
+      display: none;
+      text-align: center;
+      padding-top: 80px;
+      animation: fadeUp 0.4s ease-out;
+    }
+    .pulse-icon {
+      width: 96px; height: 96px;
+      margin: 0 auto 32px;
+      border-radius: 28px;
+      background: linear-gradient(135deg, rgba(99,102,241,0.12), rgba(139,92,246,0.12));
+      display: flex; align-items: center; justify-content: center;
+      font-size: 44px;
+      animation: pulse 1.5s ease-in-out infinite;
+    }
+    .loading-step {
+      font-size: 20px;
+      font-weight: 700;
+      letter-spacing: -0.3px;
+      margin-bottom: 16px;
+      min-height: 30px;
+    }
+    .progress-dots {
+      display: flex;
+      justify-content: center;
+      gap: 6px;
+      margin-bottom: 24px;
+    }
+    .progress-dot {
+      height: 8px;
+      border-radius: 4px;
+      background: rgba(255,255,255,0.1);
+      transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    .progress-dot.active {
+      background: var(--primary);
+    }
+    .progress-dot.current {
+      width: 24px !important;
+      background: var(--primary);
+    }
+    .loading-subtitle {
+      color: var(--text-secondary);
+      font-size: 14px;
+      margin-bottom: 10px;
+    }
+    .loading-url {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 14px;
+      background: var(--surface);
+      border-radius: 8px;
+      font-size: 12px;
+      font-family: 'SF Mono', 'Fira Code', monospace;
+      color: var(--text-secondary);
+      max-width: 100%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    /* ── Report View ───────────────────────────── */
+    #report-view {
+      display: none;
+      animation: fadeUp 0.5s ease-out;
+    }
+    .verdict-header {
+      padding: 28px;
+      border-radius: var(--radius);
+      text-align: center;
+      margin-bottom: 20px;
+      border: 1.5px solid;
+    }
+    .verdict-icon {
+      width: 64px; height: 64px;
+      border-radius: 20px;
+      margin: 0 auto 16px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 32px;
+    }
+    .verdict-title { font-size: 14px; margin-bottom: 10px; }
+    .verdict-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 18px;
+      border-radius: 12px;
+      font-weight: 700;
+      font-size: 15px;
+      letter-spacing: 0.3px;
+      border: 1px solid;
+    }
+    .verdict-label {
+      font-size: 12px;
+      color: var(--text-secondary);
+      font-weight: 500;
+      margin-top: 8px;
+    }
+
+    /* ── Summary Card ──────────────────────────── */
+    .card {
+      background: var(--surface);
+      border-radius: var(--radius);
+      border: 1px solid var(--border);
+      padding: 18px;
+      margin-bottom: 16px;
+    }
+    .card-label {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      font-weight: 700;
+      margin-bottom: 10px;
+    }
+    .card-label .icon { font-size: 16px; }
+    .card p {
+      font-size: 14px;
+      line-height: 1.65;
+      color: rgba(232,232,240,0.8);
+    }
+
+    /* ── Claim Cards ───────────────────────────── */
+    .claims-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin: 24px 0 14px;
+      font-size: 16px;
+      font-weight: 700;
+    }
+    .claim-card {
+      background: var(--surface);
+      border-radius: var(--radius);
+      border: 1px solid var(--border);
+      margin-bottom: 12px;
+      overflow: hidden;
+      transition: border-color 0.2s;
+    }
+    .claim-header {
+      padding: 16px;
+      cursor: pointer;
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      transition: background 0.2s;
+    }
+    .claim-header:hover { background: var(--surface-hover); }
+    .claim-num {
+      width: 28px; height: 28px;
+      border-radius: 8px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 13px;
+      font-weight: 700;
+      flex-shrink: 0;
+    }
+    .claim-body { flex: 1; }
+    .claim-text {
+      font-size: 14px;
+      font-weight: 500;
+      line-height: 1.5;
+      margin-bottom: 8px;
+    }
+    .claim-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 4px 10px;
+      border-radius: 8px;
+      font-size: 12px;
+      font-weight: 700;
+      border: 1px solid;
+    }
+    .claim-arrow {
+      font-size: 20px;
+      color: var(--text-secondary);
+      transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+      flex-shrink: 0;
+      margin-top: 4px;
+    }
+    .claim-arrow.open { transform: rotate(180deg); }
+
+    .claim-detail {
+      max-height: 0;
+      overflow: hidden;
+      transition: max-height 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    .claim-detail.open { max-height: 600px; }
+    .claim-detail-inner {
+      padding: 0 16px 16px;
+      border-top: 1px solid var(--border);
+      padding-top: 16px;
+    }
+    .detail-label {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-secondary);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 6px;
+    }
+    .detail-text {
+      font-size: 14px;
+      line-height: 1.6;
+      color: rgba(232,232,240,0.8);
+      margin-bottom: 14px;
+    }
+    .source-link {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 12px;
+      background: rgba(99,102,241,0.06);
+      border-radius: 8px;
+      margin-bottom: 6px;
+      text-decoration: none;
+      color: var(--primary);
+      font-size: 13px;
+      font-weight: 500;
+      transition: background 0.2s;
+    }
+    .source-link:hover { background: rgba(99,102,241,0.12); }
+
+    /* ── Error View ────────────────────────────── */
+    #error-view {
+      display: none;
+      text-align: center;
+      padding-top: 80px;
+      animation: fadeUp 0.4s ease-out;
+    }
+    .error-icon {
+      width: 80px; height: 80px;
+      margin: 0 auto 24px;
+      border-radius: 24px;
+      background: rgba(244,67,54,0.1);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 40px;
+    }
+    .error-title {
+      font-size: 22px;
+      font-weight: 700;
+      margin-bottom: 12px;
+    }
+    .error-message {
+      color: var(--text-secondary);
+      font-size: 14px;
+      line-height: 1.6;
+      margin-bottom: 28px;
+      max-width: 400px;
+      margin-left: auto;
+      margin-right: auto;
+    }
+    .btn-outline {
+      padding: 12px 24px;
+      background: transparent;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      color: var(--text-secondary);
+      font-family: inherit;
+      font-size: 14px;
+      cursor: pointer;
+      transition: border-color 0.2s, color 0.2s;
+    }
+    .btn-outline:hover {
+      border-color: var(--text-secondary);
+      color: var(--text);
+    }
+
+    /* New check button */
+    .new-check-btn {
+      margin-top: 24px;
+      text-align: center;
+    }
+
+    /* ── Animations ────────────────────────────── */
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(16px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    @keyframes pulse {
+      0%, 100% { transform: scale(0.92); opacity: 0.8; }
+      50% { transform: scale(1); opacity: 1; }
+    }
+
+    /* ── Verdict Colors ────────────────────────── */
+    .v-true { --vc: var(--true); }
+    .v-mostly_true { --vc: var(--mostly-true); }
+    .v-mixed { --vc: var(--mixed); }
+    .v-misleading { --vc: var(--misleading); }
+    .v-false { --vc: var(--false); }
+    .v-unverifiable { --vc: var(--unverifiable); }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>InstaFactCheck</h1>
+</header>
+
+<main>
+  <!-- HOME VIEW -->
+  <div id="home-view">
+    <div class="hero-icon">🔍</div>
+    <h2 class="hero-title">Fact-Check Instagram Posts & Reels</h2>
+    <p class="hero-subtitle">
+      Paste an Instagram reel, video, or post URL below — or enter any claim text directly.
+    </p>
+    <div class="input-group">
+      <input type="text" id="url-input" placeholder="Paste Instagram URL (reel, post) or claim text..." autofocus>
+      <button class="btn-primary" id="analyze-btn" onclick="analyze()">Fact-Check</button>
+    </div>
+    <div class="how-it-works">
+      <h3>Supported formats</h3>
+      <div class="step-row"><div class="step-icon">🎬</div><span>Instagram Reels (<code style="color:var(--primary)">/reel/...</code>)</span></div>
+      <div class="step-row"><div class="step-icon">📸</div><span>Instagram Posts & Carousels (<code style="color:var(--primary)">/p/...</code>)</span></div>
+      <div class="step-row"><div class="step-icon">📝</div><span>Direct Claim Text or Captions</span></div>
+    </div>
+  </div>
+
+  <!-- LOADING VIEW -->
+  <div id="loading-view">
+    <div class="pulse-icon" id="loading-icon">📥</div>
+    <div class="loading-step" id="loading-step">Processing content...</div>
+    <div class="progress-dots" id="progress-dots"></div>
+    <div class="loading-subtitle">This usually takes 15–40 seconds</div>
+    <div class="loading-url" id="loading-url"></div>
+  </div>
+
+  <!-- REPORT VIEW -->
+  <div id="report-view"></div>
+
+  <!-- ERROR VIEW -->
+  <div id="error-view">
+    <div class="error-icon">⚠️</div>
+    <h2 class="error-title">Could not analyze post</h2>
+    <p class="error-message" id="error-message"></p>
+    <button class="btn-primary" onclick="retry()" style="margin-right:10px">Try Again</button>
+    <button class="btn-outline" onclick="goHome()">Back to Home</button>
+  </div>
+</main>
+
+<script>
+const STEPS = [
+  { text: 'Retrieving post / reel...', icon: '📥' },
+  { text: 'Extracting audio & caption...', icon: '🎵' },
+  { text: 'Transcribing speech...', icon: '🎙️' },
+  { text: 'Analyzing claims with AI...', icon: '🧠' },
+  { text: 'Verifying factual evidence...', icon: '🌐' },
+  { text: 'Generating report...', icon: '✅' },
+];
+
+const VERDICT_MAP = {
+  true:         { label: 'True',         emoji: '✅', color: '#4caf50' },
+  mostly_true:  { label: 'Mostly True',  emoji: '👍', color: '#8bc34a' },
+  mixed:        { label: 'Mixed',        emoji: '↔️', color: '#ff9800' },
+  misleading:   { label: 'Misleading',   emoji: '⚠️', color: '#ff5722' },
+  false:        { label: 'False',        emoji: '❌', color: '#f44336' },
+  unverifiable: { label: 'Unverifiable', emoji: '❓', color: '#9e9e9e' },
+};
+
+let currentInput = '';
+let isUrl = false;
+let stepInterval = null;
+let currentStep = 0;
+
+function show(id) {
+  ['home-view', 'loading-view', 'report-view', 'error-view'].forEach(v => {
+    document.getElementById(v).style.display = v === id ? 'block' : 'none';
+  });
+}
+
+function goHome() {
+  clearInterval(stepInterval);
+  show('home-view');
+  document.getElementById('url-input').value = currentInput;
+  document.getElementById('url-input').focus();
+}
+
+function retry() {
+  if (currentInput) analyze(currentInput);
+  else goHome();
+}
+
+function startLoadingAnimation(input) {
+  currentStep = 0;
+  const dots = document.getElementById('progress-dots');
+  dots.innerHTML = STEPS.map((_, i) =>
+    `<div class="progress-dot" style="width:8px" id="dot-${i}"></div>`
+  ).join('');
+
+  updateStep(0);
+
+  stepInterval = setInterval(() => {
+    if (currentStep < STEPS.length - 1) {
+      currentStep++;
+      updateStep(currentStep);
+    }
+  }, 4500);
+
+  document.getElementById('loading-url').textContent = input.length > 50 ? input.slice(0, 47) + '...' : input;
+  show('loading-view');
+}
+
+function updateStep(idx) {
+  document.getElementById('loading-step').textContent = STEPS[idx].text;
+  document.getElementById('loading-icon').textContent = STEPS[idx].icon;
+  STEPS.forEach((_, i) => {
+    const dot = document.getElementById(`dot-${i}`);
+    dot.className = 'progress-dot' + (i < idx ? ' active' : '') + (i === idx ? ' current active' : '');
+    dot.style.width = i === idx ? '24px' : '8px';
+  });
+}
+
+async function analyze(inputOverride) {
+  const input = inputOverride || document.getElementById('url-input').value.trim();
+  if (!input) return;
+
+  currentInput = input;
+  isUrl = input.startsWith('http://') || input.startsWith('https://');
+
+  clearInterval(stepInterval);
+  startLoadingAnimation(input);
+  document.getElementById('analyze-btn').disabled = true;
+
+  const payload = isUrl ? { url: input } : { text: input };
+
+  try {
+    const resp = await fetch('/analyze', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+
+    clearInterval(stepInterval);
+
+    if (!resp.ok) {
+      let detail = 'Unknown error';
+      try {
+        const err = await resp.json();
+        detail = err.detail || detail;
+      } catch { detail = resp.statusText; }
+      showError(detail);
+      return;
+    }
+
+    const data = await resp.json();
+    renderReport(data);
+
+  } catch (err) {
+    clearInterval(stepInterval);
+    showError('Cannot connect to the server. ' + err.message);
+  } finally {
+    document.getElementById('analyze-btn').disabled = false;
+  }
+}
+
+function showError(msg) {
+  document.getElementById('error-message').textContent = msg;
+  show('error-view');
+}
+
+function renderReport(data) {
+  const v = VERDICT_MAP[data.overall_verdict] || VERDICT_MAP.unverifiable;
+  const vc = v.color;
+
+  let html = `
+    <div class="verdict-header" style="background:${vc}08; border-color:${vc}22;">
+      <div class="verdict-icon" style="background:${vc}18; font-size:32px;">${v.emoji}</div>
+      ${data.video_title ? `<div class="verdict-title" style="color:${vc}cc">${esc(data.video_title)}</div>` : ''}
+      <div class="verdict-badge" style="background:${vc}18; color:${vc}; border-color:${vc}33;">
+        ${v.emoji} ${v.label}
+      </div>
+      <div class="verdict-label">Overall Verdict</div>
+    </div>
+
+    <div class="card">
+      <div class="card-label"><span class="icon">📋</span> Summary</div>
+      <p>${esc(data.overall_summary)}</p>
+    </div>
+  `;
+
+  if (data.transcript_snippet) {
+    html += `
+      <div class="card" style="background:rgba(19,19,29,0.6)">
+        <div class="card-label" style="color:var(--text-secondary)"><span class="icon">💬</span> Transcript preview</div>
+        <p style="font-style:italic; color:var(--text-secondary)">"${esc(data.transcript_snippet)}..."</p>
+      </div>
+    `;
+  }
+
+  if (data.claims && data.claims.length > 0) {
+    html += `<div class="claims-header">📃 Claims (${data.claims.length})</div>`;
+    data.claims.forEach((claim, i) => {
+      const cv = VERDICT_MAP[claim.verdict] || VERDICT_MAP.unverifiable;
+      const cc = cv.color;
+      const id = `claim-${i}`;
+      html += `
+        <div class="claim-card" style="border-color:${cc}18">
+          <div class="claim-header" onclick="toggleClaim('${id}')">
+            <div class="claim-num" style="background:${cc}15; color:${cc}">${i + 1}</div>
+            <div class="claim-body">
+              <div class="claim-text">${esc(claim.claim_text)}</div>
+              <div class="claim-badge" style="background:${cc}15; color:${cc}; border-color:${cc}30">
+                ${cv.emoji} ${cv.label}
+              </div>
+            </div>
+            <div class="claim-arrow" id="${id}-arrow">▾</div>
+          </div>
+          <div class="claim-detail" id="${id}">
+            <div class="claim-detail-inner">
+              <div class="detail-label">Explanation</div>
+              <div class="detail-text">${esc(claim.explanation)}</div>
+              ${claim.sources && claim.sources.length > 0 ? `
+                <div class="detail-label">Sources</div>
+                ${claim.sources.map(s => `
+                  <a class="source-link" href="${esc(s.url)}" target="_blank" rel="noopener">
+                    🔗 ${esc(s.title || s.url)}
+                  </a>
+                `).join('')}
+              ` : ''}
+            </div>
+          </div>
+        </div>
+      `;
+    });
+  }
+
+  html += `
+    <div class="new-check-btn">
+      <button class="btn-outline" onclick="goHome()">← Check another reel</button>
+    </div>
+  `;
+
+  document.getElementById('report-view').innerHTML = html;
+  show('report-view');
+}
+
+function toggleClaim(id) {
+  const el = document.getElementById(id);
+  const arrow = document.getElementById(id + '-arrow');
+  el.classList.toggle('open');
+  arrow.classList.toggle('open');
+}
+
+function esc(str) {
+  const d = document.createElement('div');
+  d.textContent = str || '';
+  return d.innerHTML;
+}
+
+// Enter key
+document.getElementById('url-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter') analyze();
+});
+</script>
+</body>
+</html>
