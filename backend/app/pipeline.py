@@ -216,8 +216,8 @@ async def analyze_reel(url: str) -> AnalyzeResponse:
 def _aggregate_verdict(claims: list, has_mismatch: bool = False) -> Verdict:
     """Determine an overall verdict from individual claim verdicts.
 
-    If the caption misrepresents or contradicts the video (has_mismatch),
-    the overall verdict is adjusted to at least MISLEADING.
+    If the caption deliberately misrepresents or contradicts the video (has_mismatch),
+    the overall verdict reflects the false framing unless all claims are verified true.
     """
     if not claims:
         return Verdict.UNVERIFIABLE
@@ -225,26 +225,26 @@ def _aggregate_verdict(claims: list, has_mismatch: bool = False) -> Verdict:
     counts = Counter(c.verdict for c in claims)
     total = len(claims)
 
-    # If any claim is false, overall is false or misleading
+    # 1. If any claim is false
     if counts.get(Verdict.FALSE, 0) > 0:
         if counts[Verdict.FALSE] > total / 2:
             return Verdict.FALSE
         return Verdict.MISLEADING
 
-    # If there is a major discrepancy between the caption and the video
-    if has_mismatch:
-        return Verdict.MISLEADING
-
-    # If all true
+    # 2. If all claims are true and verified
     if counts.get(Verdict.TRUE, 0) == total:
         return Verdict.TRUE
 
-    # If mostly true
+    # 3. If there is a major discrepancy between caption framing and video reality
+    if has_mismatch:
+        return Verdict.MISLEADING
+
+    # 4. If mostly true
     true_ish = counts.get(Verdict.TRUE, 0) + counts.get(Verdict.MOSTLY_TRUE, 0)
     if true_ish > total / 2:
         return Verdict.MOSTLY_TRUE
 
-    # If mostly unverifiable
+    # 5. If mostly unverifiable
     if counts.get(Verdict.UNVERIFIABLE, 0) > total / 2:
         return Verdict.UNVERIFIABLE
 
