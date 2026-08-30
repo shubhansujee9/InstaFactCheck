@@ -246,37 +246,125 @@
       display: none;
       animation: fadeUp 0.5s ease-out;
     }
-    .verdict-header {
-      padding: 28px;
-      border-radius: var(--radius);
-      text-align: center;
-      margin-bottom: 20px;
-      border: 1.5px solid;
-    }
-    .verdict-icon {
-      width: 64px; height: 64px;
+    .verdict-hero {
+      position: relative;
+      padding: 28px 24px;
       border-radius: 20px;
-      margin: 0 auto 16px;
-      display: flex; align-items: center; justify-content: center;
-      font-size: 32px;
+      margin-bottom: 20px;
+      border: 1px solid;
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      overflow: hidden;
+      box-shadow: 0 20px 40px -15px rgba(0,0,0,0.5);
     }
-    .verdict-title { font-size: 14px; margin-bottom: 10px; }
-    .verdict-badge {
+    .verdict-hero-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+    .post-author-pill {
       display: inline-flex;
       align-items: center;
       gap: 6px;
-      padding: 8px 18px;
-      border-radius: 12px;
-      font-weight: 700;
-      font-size: 15px;
-      letter-spacing: 0.3px;
-      border: 1px solid;
+      padding: 6px 12px;
+      border-radius: 20px;
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.1);
+      font-size: 13px;
+      font-weight: 600;
+      color: #e0e0e0;
+      max-width: 70%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
-    .verdict-label {
+    .btn-header-new {
+      padding: 6px 14px;
+      background: rgba(255,255,255,0.08);
+      border: 1px solid rgba(255,255,255,0.15);
+      border-radius: 20px;
+      color: #e0e0e0;
       font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .btn-header-new:hover {
+      background: rgba(255,255,255,0.15);
+      color: #fff;
+    }
+    .verdict-hero-center {
+      text-align: center;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      margin-bottom: 22px;
+    }
+    .verdict-glow-icon {
+      width: 72px;
+      height: 72px;
+      border-radius: 22px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 38px;
+      margin-bottom: 14px;
+      border: 1px solid;
+      animation: floatBadge 3s ease-in-out infinite;
+    }
+    .verdict-hero-label {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      margin-bottom: 4px;
+      opacity: 0.8;
+    }
+    .verdict-hero-title {
+      font-size: 28px;
+      font-weight: 800;
+      letter-spacing: -0.5px;
+      margin-bottom: 6px;
+    }
+    .verdict-hero-desc {
+      font-size: 14px;
+      color: rgba(240,240,250,0.75);
+      max-width: 460px;
+      line-height: 1.5;
+    }
+    .verdict-metrics-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+      gap: 10px;
+      padding-top: 18px;
+      border-top: 1px solid rgba(255,255,255,0.08);
+    }
+    .metric-pill {
+      background: rgba(0,0,0,0.25);
+      border: 1px solid rgba(255,255,255,0.07);
+      border-radius: 12px;
+      padding: 10px 12px;
+      text-align: center;
+    }
+    .metric-pill-title {
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
       color: var(--text-secondary);
-      font-weight: 500;
-      margin-top: 8px;
+      margin-bottom: 4px;
+    }
+    .metric-pill-val {
+      font-size: 13px;
+      font-weight: 700;
+      color: #fff;
+    }
+
+    @keyframes floatBadge {
+      0%, 100% { transform: translateY(0); }
+      50% { transform: translateY(-4px); }
     }
 
     /* ── Summary Card ──────────────────────────── */
@@ -645,14 +733,61 @@ function renderReport(data) {
   const v = VERDICT_MAP[data.overall_verdict] || VERDICT_MAP.unverifiable;
   const vc = v.color;
 
+  const totalClaims = data.claims ? data.claims.length : 0;
+  const trueCount = data.claims ? data.claims.filter(c => c.verdict === 'true' || c.verdict === 'mostly_true').length : 0;
+  const falseCount = data.claims ? data.claims.filter(c => c.verdict === 'false' || c.verdict === 'misleading').length : 0;
+  const unverifiedCount = totalClaims - trueCount - falseCount;
+
+  const verdictDescriptions = {
+    true: 'All extracted claims in this post are factually accurate and verified by evidence.',
+    mostly_true: 'The primary message is accurate with only minor inaccuracies or nuances.',
+    mixed: 'Contains a mixture of true assertions and unsupported or inaccurate claims.',
+    misleading: 'The content is misleading, selectively edited, or framed out of true context.',
+    false: 'The central assertions in this post are false or thoroughly debunked.',
+    unverifiable: 'The post contains opinions or claims that cannot be factually confirmed.',
+  };
+
+  const desc = verdictDescriptions[data.overall_verdict] || verdictDescriptions.unverifiable;
+
   let html = `
-    <div class="verdict-header" style="background:${vc}08; border-color:${vc}22;">
-      <div class="verdict-icon" style="background:${vc}18; font-size:32px;">${v.emoji}</div>
-      ${data.video_title ? `<div class="verdict-title" style="color:${vc}cc">${esc(data.video_title)}</div>` : ''}
-      <div class="verdict-badge" style="background:${vc}18; color:${vc}; border-color:${vc}33;">
-        ${v.emoji} ${v.label}
+    <div class="verdict-hero" style="background: radial-gradient(circle at 50% 0%, ${vc}22 0%, rgba(18,18,28,0.92) 80%); border-color: ${vc}44; box-shadow: 0 20px 40px -15px ${vc}25;">
+      
+      <div class="verdict-hero-top">
+        <div class="post-author-pill">
+          <span>📸</span>
+          <span>${esc(data.video_title || 'Instagram Post / Reel')}</span>
+        </div>
+        <button class="btn-header-new" onclick="goHome()">← New Check</button>
       </div>
-      <div class="verdict-label">Overall Verdict</div>
+
+      <div class="verdict-hero-center">
+        <div class="verdict-glow-icon" style="background: ${vc}1a; border-color: ${vc}55; color: ${vc}; box-shadow: 0 0 30px ${vc}35;">
+          ${v.emoji}
+        </div>
+        <div class="verdict-hero-label" style="color: ${vc};">OVERALL VERDICT</div>
+        <div class="verdict-hero-title" style="color: ${vc};">${v.label.toUpperCase()}</div>
+        <div class="verdict-hero-desc">${desc}</div>
+      </div>
+
+      <div class="verdict-metrics-grid">
+        <div class="metric-pill">
+          <div class="metric-pill-title">Claims Evaluated</div>
+          <div class="metric-pill-val">${totalClaims} ${totalClaims === 1 ? 'Claim' : 'Claims'}</div>
+        </div>
+        <div class="metric-pill">
+          <div class="metric-pill-title">Visual Authenticity</div>
+          <div class="metric-pill-val" style="color:${data.forensics && data.forensics.is_likely_ai_generated ? '#f44336' : '#4caf50'}">
+            ${data.forensics && data.forensics.is_likely_ai_generated ? '🤖 AI Synthetic' : '🛡️ Authentic'}
+          </div>
+        </div>
+        <div class="metric-pill">
+          <div class="metric-pill-title">Context Alignment</div>
+          <div class="metric-pill-val" style="color:${data.has_caption_video_mismatch ? '#ff5722' : '#4caf50'}">
+            ${data.has_caption_video_mismatch ? '⚠️ Mismatched' : '✅ Verified Match'}
+          </div>
+        </div>
+      </div>
+
     </div>
 
     <div class="card">
