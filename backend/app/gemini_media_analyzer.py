@@ -129,7 +129,7 @@ def analyze_video_with_gemini(video_path: Path, caption: str = "") -> GeminiMedi
             if time.monotonic() > deadline:
                 logger.warning("Gemini file processing timed out")
                 return None
-            time.sleep(2)
+            time.sleep(0.8)
             uploaded = genai.get_file(uploaded.name)
 
         if uploaded.state.name != "ACTIVE":

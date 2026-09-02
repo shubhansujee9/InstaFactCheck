@@ -72,8 +72,13 @@ async def root():
 
 @app.get("/health")
 async def health():
-    """Simple liveness probe."""
-    return {"status": "ok"}
+    """Liveness & version probe."""
+    return {
+        "status": "ok",
+        "version": "0.3.0",
+        "pipeline": "native-async-parallel",
+        "multimodal_model": os.environ.get("GEMINI_MEDIA_MODEL", "gemini-2.5-flash"),
+    }
 
 
 @app.post("/analyze", response_model=AnalyzeResponse)
@@ -94,9 +99,8 @@ async def analyze(request: AnalyzeRequest):
     start = time.monotonic()
 
     try:
-        loop = asyncio.get_running_loop()
         result = await asyncio.wait_for(
-            loop.run_in_executor(None, _run_pipeline_sync, request.url, request.text),
+            analyze_content(url=request.url, text=request.text),
             timeout=REQUEST_TIMEOUT,
         )
     except asyncio.TimeoutError:
@@ -134,10 +138,3 @@ async def analyze(request: AnalyzeRequest):
         len(result.claims),
     )
     return result
-
-
-def _run_pipeline_sync(url: str | None, text: str | None) -> AnalyzeResponse:
-    """Wrapper to call the async pipeline from a sync executor context."""
-    import asyncio as _asyncio
-
-    return _asyncio.run(analyze_content(url=url, text=text))
