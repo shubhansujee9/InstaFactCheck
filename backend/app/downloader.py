@@ -78,7 +78,24 @@ def download_reel(url: str) -> DownloadResult:
     """
     url = validate_instagram_url(url)
     tmp = tempfile.mkdtemp(prefix="instafact_")
-    output_template = str(Path(tmp) / "%(id)s.%(ext)s")
+    tmp_path = Path(tmp)
+
+    # ── Fast-path: Try parth-dl direct GraphQL resolver first (1-2s) ──
+    logger.info("Step 1a: Attempting fast parth-dl resolver for %s...", url)
+    video_path, caption, title = _download_video_parth_dl(url, tmp_path)
+    if video_path and video_path.exists() and video_path.stat().st_size > 5000:
+        logger.info("Fast-path download succeeded: %s (%d bytes)", video_path.name, video_path.stat().st_size)
+        return DownloadResult(
+            video_path=video_path,
+            image_paths=[],
+            caption=caption,
+            title=title,
+            temp_dir=tmp,
+        )
+
+    # ── Fallback 1: yt-dlp ──
+    logger.info("Fast-path did not produce video, trying yt-dlp...")
+    output_template = str(tmp_path / "%(id)s.%(ext)s")
 
     ytdlp_bin = _find_executable("yt-dlp")
     cmd = [
@@ -101,26 +118,8 @@ def download_reel(url: str) -> DownloadResult:
             timeout=120,
         )
     except subprocess.TimeoutExpired as exc:
-        raise RuntimeError("yt-dlp download timed out after 120s") from exc
+        logger.warning("yt-dlp timed out: %s", exc)
 
-    if result.returncode != 0:
-        stderr = result.stderr.strip()
-        stdout = result.stdout.strip()
-        combined_err = f"{stdout}\n{stderr}"
-        
-        # Check if yt-dlp simply noted that this is a photo/text post without video
-        if "There is no video in this post" in combined_err or "no video" in combined_err.lower():
-            logger.info("Post contains no video (photo/carousel/text post). Extracting metadata...")
-            is_no_video_post = True
-        elif "Private" in combined_err or "login" in combined_err.lower():
-            raise PermissionError(
-                "This Instagram post appears to be private or requires login."
-            )
-        else:
-            logger.warning("yt-dlp non-zero exit (%d): %s", result.returncode, stderr[:200])
-
-    tmp_path = Path(tmp)
-    
     # ── Step 1: Look for downloaded video files ──
     video_files = [
         f for f in tmp_path.iterdir()
@@ -135,15 +134,13 @@ def download_reel(url: str) -> DownloadResult:
     ]
 
     # ── Step 3: Extract caption and title from info JSON ──
-    caption = ""
-    title = ""
     info_files = list(tmp_path.glob("*.info.json"))
     if info_files:
         try:
             with open(info_files[0], encoding="utf-8") as fh:
                 info = json.load(fh)
-            caption = info.get("description", "") or info.get("caption", "") or ""
-            title = info.get("title", "") or info.get("fulltitle", "") or ""
+            caption = info.get("description", "") or info.get("caption", "") or caption
+            title = info.get("title", "") or info.get("fulltitle", "") or title
         except (json.JSONDecodeError, OSError) as exc:
             logger.warning("Failed to parse info JSON: %s", exc)
 

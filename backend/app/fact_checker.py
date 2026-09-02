@@ -180,6 +180,103 @@ def _parse_json_safely(raw: str) -> dict:
         return {}
 
 
+async def search_evidence_async(claim_text: str) -> list[dict]:
+    """Search for live web evidence asynchronously."""
+    import asyncio
+    try:
+        return await asyncio.to_thread(search_evidence, claim_text)
+    except Exception as exc:
+        logger.warning("Async search error for '%s': %s", claim_text[:50], exc)
+        return []
+
+
+async def evaluate_claim_async(
+    claim_text: str,
+    evidence: list[dict],
+    source_origin: str = "content",
+    mismatch_warning: str | None = None,
+) -> Claim:
+    """Evaluate a claim asynchronously using AsyncOpenAI / Gemini."""
+    api_key = os.environ.get("OPENAI_API_KEY")
+    if not api_key:
+        raise EnvironmentError("OPENAI_API_KEY is not set")
+
+    base_url = os.environ.get("OPENAI_BASE_URL")
+    async_client = openai.AsyncOpenAI(api_key=api_key, **(dict(base_url=base_url) if base_url else {}))
+    model = os.environ.get("OPENAI_MODEL", "gemini-flash-latest")
+
+    evidence_text = _format_evidence(evidence)
+    parts = [f"=== CLAIM ===\n{claim_text}\n(Claim Origin: {source_origin})"]
+    if mismatch_warning:
+        parts.append(f"=== CONTEXTUAL DISCREPANCY WARNING ===\n{mismatch_warning}")
+    parts.append(f"=== EVIDENCE ===\n{evidence_text}")
+    user_content = "\n\n".join(parts)
+
+    logger.info("Evaluating claim asynchronously with %s: %s", model, claim_text[:60])
+
+    raw = ""
+    try:
+        response = await async_client.chat.completions.create(
+            model=model,
+            temperature=0.1,
+            response_format={"type": "json_object"},
+            messages=[
+                {"role": "system", "content": VERDICT_PROMPT},
+                {"role": "user", "content": user_content},
+            ],
+        )
+        raw = response.choices[0].message.content or "{}"
+    except Exception as exc:
+        logger.warning("Async call with json_object failed (%s), retrying standard...", exc)
+        response = await async_client.chat.completions.create(
+            model=model,
+            temperature=0.1,
+            messages=[
+                {"role": "system", "content": VERDICT_PROMPT},
+                {"role": "user", "content": user_content},
+            ],
+        )
+        raw = response.choices[0].message.content or "{}"
+
+    data = _parse_json_safely(raw)
+
+    verdict_str = data.get("verdict", "unverifiable").lower().strip()
+    try:
+        verdict = Verdict(verdict_str)
+    except ValueError:
+        verdict = Verdict.UNVERIFIABLE
+
+    sources = [
+        Source(title=s.get("title", ""), url=s.get("url", ""))
+        for s in data.get("sources", [])
+        if s.get("url")
+    ]
+
+    return Claim(
+        claim_text=claim_text,
+        verdict=verdict,
+        explanation=data.get("explanation", "Could not determine verdict."),
+        source_origin=source_origin,
+        mismatch_warning=mismatch_warning,
+        sources=sources,
+    )
+
+
+async def check_claim_async(
+    claim_text: str,
+    source_origin: str = "content",
+    mismatch_warning: str | None = None,
+) -> Claim:
+    """Concurrent async pipeline for a single claim: search → evaluate."""
+    evidence = await search_evidence_async(claim_text)
+    return await evaluate_claim_async(
+        claim_text=claim_text,
+        evidence=evidence,
+        source_origin=source_origin,
+        mismatch_warning=mismatch_warning,
+    )
+
+
 def check_claim(
     claim_text: str,
     source_origin: str = "content",
@@ -204,6 +301,6 @@ def _format_evidence(results: list[dict]) -> str:
     for i, r in enumerate(results, 1):
         title = r.get("title", "Untitled")
         url = r.get("url", "")
-        content = r.get("content", "")[:500]  # cap per-result length
+        content = r.get("content", "")[:500]
         parts.append(f"[{i}] {title}\n    URL: {url}\n    {content}")
     return "\n\n".join(parts)

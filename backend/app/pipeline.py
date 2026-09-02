@@ -6,9 +6,10 @@ import logging
 import shutil
 from collections import Counter
 
+import asyncio
 from .claim_extractor import extract_claims
 from .downloader import download_reel
-from .fact_checker import check_claim
+from .fact_checker import check_claim_async
 from .schemas import AnalyzeResponse, MediaForensics, Verdict
 from .transcriber import get_transcript
 
@@ -25,9 +26,10 @@ async def analyze_content(url: str | None = None, text: str | None = None) -> An
 
 
 async def analyze_text(text: str) -> AnalyzeResponse:
-    """Fact-check raw claim or caption text directly."""
+    """Fact-check raw claim or caption text directly with parallel async evaluation."""
     logger.info("Extracting claims directly from text (%d chars)...", len(text))
-    raw_claims = extract_claims(caption=text, transcript="")
+    extraction_res = extract_claims(caption=text, transcript="")
+    raw_claims = extraction_res.get("claims", [])
     
     if not raw_claims:
         return AnalyzeResponse(
@@ -37,52 +39,61 @@ async def analyze_text(text: str) -> AnalyzeResponse:
             transcript_snippet=text[:200],
         )
 
-    logger.info("Fact-checking %d extracted claims in parallel...", len(raw_claims))
-    valid_claims = [r.get("claim_text", "") for r in raw_claims if r.get("claim_text", "")]
-    checked_claims = []
-    if valid_claims:
-        import concurrent.futures
-        with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(valid_claims), 6)) as executor:
-            checked_claims = list(executor.map(check_claim, valid_claims))
+    logger.info("Fact-checking %d extracted claims in parallel (async)...", len(raw_claims))
+    valid_items = [r for r in raw_claims if r.get("claim_text")]
+    checked_claims = await asyncio.gather(*[
+        check_claim_async(
+            claim_text=item.get("claim_text", ""),
+            source_origin=item.get("source_origin", "content"),
+            mismatch_warning=item.get("mismatch_warning"),
+        )
+        for item in valid_items
+    ])
 
-    overall_verdict = _aggregate_verdict(checked_claims)
-    overall_summary = _build_summary(checked_claims, text, "")
+    overall_verdict = _aggregate_verdict(list(checked_claims))
+    overall_summary = _build_summary(list(checked_claims), text, "")
 
     return AnalyzeResponse(
         overall_summary=overall_summary,
         overall_verdict=overall_verdict,
-        claims=checked_claims,
+        claims=list(checked_claims),
         transcript_snippet=text[:200],
     )
 
 
 async def analyze_reel(url: str) -> AnalyzeResponse:
-    """Run the full fact-checking pipeline for an Instagram reel or post URL."""
+    """Run the optimized fast parallel fact-checking pipeline for an Instagram reel."""
     temp_dir: str | None = None
 
     try:
-        # ── Step 1: Download ─────────────────────────────────────────
-        logger.info("Step 1/5: Downloading reel from %s", url)
+        # ── Step 1: Fast Download ────────────────────────────────────
+        logger.info("Step 1/4: Resolving & downloading Instagram content from %s...", url)
         dl = download_reel(url)
         temp_dir = dl.temp_dir
 
-        # ── Step 2: Multimodal Video & Audio Analysis ────────────────
+        # ── Step 2: Unified Multimodal Video Understanding & Claims ──
         transcript = ""
         speech_summary = ""
         speakers: list[str] = []
         forensics = MediaForensics()
-        if dl.video_path and dl.video_path.exists():
-            logger.info("Step 2/5: Analyzing video with Gemini native audio/video model...")
+        raw_claims: list[dict] = []
+        has_mismatch = False
+        mismatch_summary = None
+        caption_summary = None
+        video_actual_context = None
+        original_full_video_title = None
+        original_full_video_url = None
 
-            # Primary: Gemini native multimodal (hears speech, sees visuals)
+        if dl.video_path and dl.video_path.exists():
+            logger.info("Step 2/4: Performing unified Gemini multimodal video analysis & claim extraction...")
             gemini_analysis = None
             try:
                 from app.gemini_media_analyzer import analyze_video_with_gemini
-                gemini_analysis = analyze_video_with_gemini(dl.video_path)
+                gemini_analysis = analyze_video_with_gemini(dl.video_path, caption=dl.caption)
             except Exception as exc:
-                logger.warning("Gemini media analysis error (%s)", exc)
+                logger.warning("Gemini multimodal analysis error (%s)", exc)
 
-            if gemini_analysis and gemini_analysis.transcript:
+            if gemini_analysis and (gemini_analysis.transcript or gemini_analysis.visual_summary):
                 transcript = gemini_analysis.transcript
                 speech_summary = gemini_analysis.speech_summary
                 speakers = gemini_analysis.speakers
@@ -93,60 +104,58 @@ async def analyze_reel(url: str) -> AnalyzeResponse:
                     is_selectively_clipped=gemini_analysis.is_selectively_clipped,
                     original_context_note=gemini_analysis.original_context_note,
                 )
+                caption_summary = gemini_analysis.caption_summary
+                video_actual_context = gemini_analysis.video_actual_context
+                original_full_video_title = gemini_analysis.original_full_video_title
+                original_full_video_url = gemini_analysis.original_full_video_url
+                has_mismatch = gemini_analysis.has_caption_video_mismatch
+                mismatch_summary = gemini_analysis.mismatch_summary
+                raw_claims = gemini_analysis.claims or []
+
                 logger.info(
-                    "Using Gemini transcript (%d chars), speakers: %s",
+                    "Unified analysis complete: %d claims ready, transcript=%d chars, speakers=%s",
+                    len(raw_claims),
                     len(transcript),
                     speakers,
                 )
             else:
-                # Fallback: local Whisper + keyframe analysis
-                logger.info("Gemini unavailable — falling back to Whisper + keyframes...")
+                # Fallback: local Whisper + keyframes + extractor
+                logger.info("Gemini video unavailable — using local Whisper fallback...")
                 try:
                     transcript = get_transcript(dl.video_path)
                 except Exception as exc:
-                    logger.warning("Transcription failed (%s). Continuing with caption metadata.", exc)
+                    logger.warning("Transcription fallback error: %s", exc)
                     transcript = ""
 
                 try:
                     from app.video_analyzer import analyze_video_frames
                     forensics = analyze_video_frames(dl.video_path)
                 except Exception as exc:
-                    logger.warning("Visual forensic analysis error (%s)", exc)
+                    logger.warning("Visual fallback error: %s", exc)
                     forensics = MediaForensics()
-        else:
-            logger.info("Step 2/5: No video stream (photo/carousel/text post). Using post caption.")
 
-        # ── Step 3: Extract claims & check consistency ───────────────
-        logger.info("Step 3/5: Extracting factual claims & checking consistency...")
-        extraction_res = extract_claims(
-            caption=dl.caption,
-            transcript=transcript,
-            visual_summary=forensics.visual_summary,
-            on_screen_text=forensics.on_screen_text,
-            speech_summary=speech_summary or None,
-            speakers=speakers or None,
-        )
-        raw_claims = extraction_res.get("claims", [])
-        has_mismatch = extraction_res.get("has_caption_video_mismatch", False)
-        mismatch_summary = extraction_res.get("mismatch_summary")
-        caption_summary = extraction_res.get("caption_summary")
-        video_actual_context = extraction_res.get("video_actual_context")
+        # ── Fallback claim extraction if one-pass analysis did not populate claims ──
+        if not raw_claims and (dl.caption or transcript or forensics.visual_summary):
+            logger.info("Extracting claims via fallback claim extractor...")
+            extraction_res = extract_claims(
+                caption=dl.caption,
+                transcript=transcript,
+                visual_summary=forensics.visual_summary,
+                on_screen_text=forensics.on_screen_text,
+                speech_summary=speech_summary or None,
+                speakers=speakers or None,
+            )
+            raw_claims = extraction_res.get("claims", [])
+            has_mismatch = extraction_res.get("has_caption_video_mismatch", False)
+            mismatch_summary = extraction_res.get("mismatch_summary")
+            caption_summary = caption_summary or extraction_res.get("caption_summary")
+            video_actual_context = video_actual_context or extraction_res.get("video_actual_context")
+            original_full_video_title = original_full_video_title or extraction_res.get("original_full_video_title")
+            original_full_video_url = original_full_video_url or extraction_res.get("original_full_video_url")
 
         # When caption mismatches video, drop caption-only claims
         if has_mismatch:
-            before = len(raw_claims)
-            raw_claims = [
-                c for c in raw_claims
-                if c.get("source_origin") != "caption"
-            ]
-            if before != len(raw_claims):
-                logger.info(
-                    "Dropped %d caption-only claims due to caption/video mismatch",
-                    before - len(raw_claims),
-                )
-
-        original_full_video_title = extraction_res.get("original_full_video_title")
-        original_full_video_url = extraction_res.get("original_full_video_url")
+            raw_claims = [c for c in raw_claims if c.get("source_origin") != "caption"]
 
         if not raw_claims:
             logger.info("No verifiable claims found — returning summary-only report")
@@ -166,27 +175,23 @@ async def analyze_reel(url: str) -> AnalyzeResponse:
                 transcript_snippet=transcript[:200] if transcript else None,
             )
 
-        # ── Step 4: Fact-check each claim concurrently ────────────────
-        logger.info("Step 4/5: Fact-checking %d claims in parallel...", len(raw_claims))
-        
-        def _check_wrapper(raw_item: dict):
-            return check_claim(
-                claim_text=raw_item.get("claim_text", ""),
-                source_origin=raw_item.get("source_origin", "content"),
-                mismatch_warning=raw_item.get("mismatch_warning"),
-            )
-
-        checked_claims = []
+        # ── Step 3: Fast Parallel Fact-Checking (asyncio.gather) ──────
+        logger.info("Step 3/4: Fact-checking %d claims in parallel with live search...", len(raw_claims))
         valid_items = [r for r in raw_claims if r.get("claim_text")]
-        if valid_items:
-            import concurrent.futures
-            with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(valid_items), 6)) as executor:
-                checked_claims = list(executor.map(_check_wrapper, valid_items))
+        checked_claims = await asyncio.gather(*[
+            check_claim_async(
+                claim_text=item.get("claim_text", ""),
+                source_origin=item.get("source_origin", "content"),
+                mismatch_warning=item.get("mismatch_warning"),
+            )
+            for item in valid_items
+        ])
 
-        # ── Step 5: Aggregate ────────────────────────────────────────
-        logger.info("Step 5/5: Aggregating report ...")
-        overall_verdict = _aggregate_verdict(checked_claims, has_mismatch)
-        overall_summary = _build_summary(checked_claims, dl.caption, transcript, mismatch_summary)
+        # ── Step 4: Aggregate ────────────────────────────────────────
+        logger.info("Step 4/4: Aggregating verified report...")
+        checked_claims_list = list(checked_claims)
+        overall_verdict = _aggregate_verdict(checked_claims_list, has_mismatch)
+        overall_summary = _build_summary(checked_claims_list, dl.caption, transcript, mismatch_summary)
 
         return AnalyzeResponse(
             overall_summary=overall_summary,
@@ -199,7 +204,7 @@ async def analyze_reel(url: str) -> AnalyzeResponse:
             original_full_video_url=original_full_video_url,
             original_full_video_title=original_full_video_title,
             instagram_url=url,
-            claims=checked_claims,
+            claims=checked_claims_list,
             video_title=dl.title or None,
             transcript_snippet=transcript[:200] if transcript else None,
         )
